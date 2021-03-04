@@ -21,10 +21,10 @@ if(APPLE)
 endif()
 
 
-
 add_executable(
   sdzoomplugin
   ${SOURCES}
 )
-target_link_libraries(sdzoomplugin json StreamDeckSDK)
+
+target_link_libraries(sdzoomplugin json StreamDeckSDK wil)
 install(TARGETS sdzoomplugin DESTINATION ${CMAKE_INSTALL_PREFIX})
