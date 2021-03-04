@@ -332,7 +332,7 @@ void osUnmuteAll()
 }
 
 
-void osZoomCustomShortcut(std::string shortcut)
+void osZoomCustomShortcut(const std::string& shortcut)
 {
   // build the apple script based on the incoming shortcut. Modifiers should always be first, so first check for mod keys, then move on to the key
   std::string s = shortcut;
