@@ -8,8 +8,11 @@
 #include <sstream>
 #include <regex>
 
-IUIAutomationElement *GetTopLevelWindowByName(LPWSTR windowName);
-void rawListDescendants(IUIAutomationElement *pParent, std::string windowType);
+#include <wil/com.h>
+#include <wil/resource.h>
+
+wil::com_ptr<IUIAutomationElement> GetTopLevelWindowByName(PCWSTR windowName);
+void rawListDescendants(wil::com_ptr<IUIAutomationElement>& pParent, const std::string& windowType);
 void altPlusKey(UINT key);
 
 std::string g_statusZoom = "stopped";
@@ -19,17 +22,23 @@ std::string g_statusShare = "unknown";
 std::string g_statusRecord = "unknown";
 std::string g_windowName = "unknown";
 
-IUIAutomation *g_pAutomation = nullptr;
+wil::com_ptr<IUIAutomation> g_pAutomation;
 
 void init()
 {
-  CoInitializeEx(NULL, COINIT_MULTITHREADED);
-  auto hr = CoCreateInstance(__uuidof(CUIAutomation), NULL, CLSCTX_INPROC_SERVER, __uuidof(IUIAutomation), (void **)&g_pAutomation);
+  CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+  auto hr = CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER, __uuidof(IUIAutomation), (void **)&g_pAutomation);
   if (FAILED(hr) || g_pAutomation == nullptr)
   {
     ESDDebug("failed to init automation");
     return;
   }
+}
+
+void deinit()
+{
+  g_pAutomation.reset();
+  CoUninitialize();
 }
 
 std::string formatStatus()
@@ -48,116 +57,102 @@ std::string osGetZoomStatus()
   init();
 
   // Get the handle of the Zoom window.
-  HWND zoomWnd = ::FindWindow(NULL, "Zoom");
-  if (zoomWnd != NULL)
+  HWND zoomWnd = ::FindWindow(nullptr, "Zoom");
+  if (zoomWnd != nullptr)
   {
     g_statusZoom = "open";
-    IUIAutomationElement *zoom = GetTopLevelWindowByName(L"Zoom");
+    auto zoom = GetTopLevelWindowByName(L"Zoom");
     rawListDescendants(zoom, "Zoom");
     g_windowName = "Zoom";
   }
 
   // Get the handle of the Zoom Meetings window.
-  zoomWnd = ::FindWindow(NULL, "Zoom Meeting");
-  if (zoomWnd != NULL)
+  zoomWnd = ::FindWindow(nullptr, "Zoom Meeting");
+  if (zoomWnd != nullptr)
   {
     g_statusZoom = "call";
-    IUIAutomationElement *zoom = GetTopLevelWindowByName(L"Zoom Meeting");
+    auto zoom = GetTopLevelWindowByName(L"Zoom Meeting");
     rawListDescendants(zoom, "Meeting");
     g_windowName = "Zoom Meeting";
   }
 
   // Get the handle of the Meetings Controls window.
-  zoomWnd = ::FindWindow(NULL, "Meeting Controls");
-  if (zoomWnd != NULL)
+  zoomWnd = ::FindWindow(nullptr, "Meeting Controls");
+  if (zoomWnd != nullptr)
   {
     g_statusZoom = "call";
-    IUIAutomationElement *zoom = GetTopLevelWindowByName(L"Meeting Controls");
+    auto zoom = GetTopLevelWindowByName(L"Meeting Controls");
     rawListDescendants(zoom, "Controls");
     g_windowName = "Meeting Controls";
   }
 
-  if (g_pAutomation != NULL)
-    g_pAutomation->Release();
-
-  CoUninitialize();
+  deinit();
 
   return formatStatus();
 }
 
-IUIAutomationElement *GetTopLevelWindowByName(LPWSTR windowName)
+wil::com_ptr<IUIAutomationElement> GetTopLevelWindowByName(PCWSTR windowName)
 {
-  if (windowName == NULL)
+  if (windowName == nullptr)
   {
-    return NULL;
+    return nullptr;
   }
 
-  VARIANT varProp;
+  wil::unique_variant varProp;
   varProp.vt = VT_BSTR;
   varProp.bstrVal = SysAllocString(windowName);
-  if (varProp.bstrVal == NULL)
+  if (varProp.bstrVal == nullptr)
   {
-    return NULL;
+    return nullptr;
   }
 
-  IUIAutomationElement *pRoot = NULL;
-  IUIAutomationElement *pFound = NULL;
-
   // Get the desktop element.
+  wil::com_ptr<IUIAutomationElement> pRoot;
   HRESULT hr = g_pAutomation->GetRootElement(&pRoot);
-  if (FAILED(hr) || pRoot == NULL)
+  if (FAILED(hr) || pRoot == nullptr)
   {
-    goto cleanup;
+    return nullptr;
   }
 
   // Get a top-level element by name, such as "Program Manager"
-  IUIAutomationCondition *pCondition = NULL;
+  wil::com_ptr<IUIAutomationCondition> pCondition;
   hr = g_pAutomation->CreatePropertyCondition(UIA_NamePropertyId, varProp, &pCondition);
   if (FAILED(hr))
   {
-    goto cleanup;
+    return nullptr;
   }
 
-  pRoot->FindFirst(TreeScope_Children, pCondition, &pFound);
-
-cleanup:
-  if (pRoot != NULL)
-    pRoot->Release();
-
-  if (pCondition != NULL)
-    pCondition->Release();
-
-  VariantClear(&varProp);
+  wil::com_ptr<IUIAutomationElement> pFound;
+  pRoot->FindFirst(TreeScope_Children, pCondition.get(), &pFound);
 
   return pFound;
 }
 
-void rawListDescendants(IUIAutomationElement *pParent, std::string windowType)
+void rawListDescendants(wil::com_ptr<IUIAutomationElement>& pParent, const std::string& windowType)
 {
-  if (pParent == NULL)
+  if (pParent == nullptr)
     return;
 
-  IUIAutomationTreeWalker *pControlWalker = NULL;
-  IUIAutomationElement *pNode = NULL;
-
+  wil::com_ptr<IUIAutomationTreeWalker> pControlWalker;
   g_pAutomation->get_RawViewWalker(&pControlWalker);
-  if (pControlWalker == NULL)
+  if (pControlWalker == nullptr)
   {
-    goto cleanup;
+    return;
   }
 
-  pControlWalker->GetFirstChildElement(pParent, &pNode);
-  if (pNode == NULL)
+  wil::com_ptr<IUIAutomationElement> pNode;
+  pControlWalker->GetFirstChildElement(pParent.get(), &pNode);
+  if (pNode == nullptr)
   {
-    goto cleanup;
+    return;
   }
 
   while (pNode)
   {
-    BSTR desc;
-    BSTR sName;
-
+    wil::unique_bstr desc;
     pNode->get_CurrentLocalizedControlType(&desc);
+
+    wil::unique_bstr sName;
     pNode->get_CurrentName(&sName);
 
     /*if (DEBUG)
@@ -178,9 +173,9 @@ void rawListDescendants(IUIAutomationElement *pParent, std::string windowType)
     }*/
 
     // we have a name of the element - match it against what we're looking for
-    if (sName != NULL)
+    if (sName != nullptr)
     {
-      std::wstring strName(sName, SysStringLen(sName));
+      std::wstring strName(sName.get(), SysStringLen(sName.get()));
 
       // we're looking for different buttons per window. This is the Main Zoom window
       if (windowType == "Meeting")
@@ -272,37 +267,22 @@ void rawListDescendants(IUIAutomationElement *pParent, std::string windowType)
     }
 
     // only go into windows and panes
-    if (desc != NULL)
-      if (0 == wcscmp(desc, L"window") || 0 == wcscmp(desc, L"pane"))
+    if (desc != nullptr)
+      if (0 == wcscmp(desc.get(), L"window") || 0 == wcscmp(desc.get(), L"pane"))
         rawListDescendants(pNode, windowType);
 
-    if (desc != NULL)
-      SysFreeString(desc);
-    if (sName != NULL)
-      SysFreeString(sName);
-
     // get the next element
-    IUIAutomationElement *pNext;
-    pControlWalker->GetNextSiblingElement(pNode, &pNext);
-    pNode->Release();
+    wil::com_ptr<IUIAutomationElement> pNext;
+    pControlWalker->GetNextSiblingElement(pNode.get(), &pNext);
     pNode = pNext;
   }
-
-cleanup:
-  if (pControlWalker != NULL)
-    pControlWalker->Release();
-
-  if (pNode != NULL)
-    pNode->Release();
-
-  return;
 }
 
 void osFocusZoomWindow()
 {
   // Get the handle of the Zoom window.
-  HWND zoomWnd = ::FindWindow(NULL, g_windowName.c_str());
-  if (zoomWnd == NULL)
+  HWND zoomWnd = ::FindWindow(nullptr, g_windowName.c_str());
+  if (zoomWnd == nullptr)
   {
     return;
   }
